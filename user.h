@@ -23,7 +23,10 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-
+int ticks_running(int);
+int get_sched_priority(int);
+int set_sched_priority(int);
+int fifo_position(int);
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

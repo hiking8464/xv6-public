@@ -103,6 +103,10 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
+extern int sys_ticks_running(void);
+extern int sys_get_sched_priority(void);
+extern int sys_set_sched_priority(void);
+extern int sys_fifo_position(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -126,6 +130,10 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_ticks_running]   sys_ticks_running,
+[SYS_get_sched_priority] sys_get_sched_priority,
+[SYS_set_sched_priority] sys_set_sched_priority,
+[SYS_fifo_position] sys_fifo_position,
 };
 
 void

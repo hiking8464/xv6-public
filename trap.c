@@ -7,12 +7,16 @@
 #include "x86.h"
 #include "traps.h"
 #include "spinlock.h"
+#define RED  "\033[31m"
+#define RESET   "\033[0m"
 
 // Interrupt descriptor table (shared by all CPUs).
 struct gatedesc idt[256];
 extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
+
+int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
 
 void
 tvinit(void)
@@ -35,7 +39,7 @@ idtinit(void)
 //PAGEBREAK: 41
 void
 trap(struct trapframe *tf)
-{
+{ 
   if(tf->trapno == T_SYSCALL){
     if(myproc()->killed)
       exit();
@@ -77,7 +81,52 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
+  case T_PGFLT:
+    char *mem;
+    uint virt_add;
+    virt_add = PGROUNDDOWN(rcr2());
+    pde_t *pgdir = myproc()->pgdir;
+    #ifdef LAZY
+      mem = kalloc();
+        if(mem == 0){
+          cprintf("allocuvm out of memory\n");
+          return;
+        }
+        memset(mem, 0, PGSIZE);
+        if(mappages(pgdir, (char*)virt_add, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
+          cprintf("allocuvm out of memory (2)\n");
+          kfree(mem);
+          return;
+        }
 
+        cprintf(RED "page fault-->\t" RESET);
+        cprintf("handled by LAZY allocator: pid %d %s: on cpu %d rcr: %x \n" RESET, myproc()->pid, myproc()->name, cpuid(), virt_add);
+    #else
+    #ifdef LOCALITY
+      int n = 3;
+      cprintf(RED "page fault-->\t" RESET);
+      cprintf("handled by Locality_Aware allocator: pid %d %s: on cpu %d rcr: %x \n", myproc()->pid, myproc()->name, cpuid(), virt_add);
+      for (int i = 0; i < n; i += 1){
+        
+        mem = kalloc();
+        if(mem == 0){
+          cprintf("allocuvm out of memory\n");
+          return;
+        }
+        memset(mem, 0, PGSIZE);
+        if(mappages(pgdir, (char*)virt_add, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
+          cprintf("allocuvm out of memory (2)\n");
+          kfree(mem);
+          return;
+        }
+        virt_add += PGSIZE;
+        
+        // cprintf("allocated virtual address: %x\n",virt_add);
+      }
+      return;
+    #endif
+    #endif
+    break;
   //PAGEBREAK: 13
   default:
     if(myproc() == 0 || (tf->cs&3) == 0){

@@ -6,7 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-
+//int responseTime=0,turnAroundTime=0,count=0;
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -19,6 +19,59 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+int sys_get_sched_priority(void){
+    struct proc *p;
+    int pid;
+    int res = -1;
+    if(argint(0, &pid) < 0)
+    return -1;
+    acquire(&ptable.lock);
+    for(p=ptable.proc; p<&ptable.proc[NPROC]; p++)
+    {
+        if(p->pid == pid && (p->state == RUNNABLE  || p->state == RUNNING))
+        {
+            res = p->pl;
+            // cprintf("res : %d",res);
+            release(&ptable.lock);
+            return res;
+        }
+    }
+    release(&ptable.lock);
+// cprintf("hiking\n");
+return res;
+}
+
+int sys_set_sched_priority(void){
+    struct proc *p;
+    int pl;
+    if(argint(0, &pl) < 0)
+    return -1;
+    p = myproc();
+    p->pl = pl;
+// cprintf("harshannnnnnnnnnnnnnnnnnnnnnnnnnnnnn\n");
+return 0;
+}
+int sys_fifo_position(void)
+{
+int pid;
+if(argint(0, &pid) < 0)
+    return -1;
+  struct proc *p;
+  acquire(&ptable.lock);
+  int position = -1;
+  int count = 0;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == RUNNABLE || p->state == RUNNING){
+      count++;
+      if(p->pid == pid){
+        position = count;
+        break;
+      }
+    }
+  }
+  release(&ptable.lock);
+  return position;
+}
 
 void
 pinit(void)
@@ -88,6 +141,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->ctime= ticks;
+  p->ticks=0;
 
   release(&ptable.lock);
 
@@ -130,6 +185,7 @@ userinit(void)
     panic("userinit: out of memory?");
   inituvm(p->pgdir, _binary_initcode_start, (int)_binary_initcode_size);
   p->sz = PGSIZE;
+  p->ctime=ticks;
   memset(p->tf, 0, sizeof(*p->tf));
   p->tf->cs = (SEG_UCODE << 3) | DPL_USER;
   p->tf->ds = (SEG_UDATA << 3) | DPL_USER;
@@ -199,6 +255,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->ticks = 0;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -219,6 +276,15 @@ fork(void)
   release(&ptable.lock);
 
   return pid;
+}
+int string_compare(const char *string_one, const char *string_two) {
+    while (*string_one != '\0' && *string_two != '\0' && *string_one == *string_two) {
+        string_two++;
+        string_one++;
+    }
+
+    // Compare the last characters
+    return (*string_one - *string_two);
 }
 
 // Exit the current process.  Does not return.
@@ -262,7 +328,25 @@ exit(void)
   }
 
   // Jump into the scheduler, never to return.
+  curproc->etime=ticks;
   curproc->state = ZOMBIE;
+  struct proc *parent_process=curproc->parent;
+  int res = 0;
+  if(string_compare(parent_process->name,"simple_scheduler_test")==0){
+  res = 1;
+  }
+  if(string_compare(parent_process->name,"advanced_scheduler_test")==0){
+  res = 1;
+  }
+  if (res == 1){
+  int responseTime= curproc->stime-curproc->ctime;
+  int turnAroundTime= curproc->etime-curproc->ctime;
+ cprintf("-------------------------------------------------------------------------------------\n");
+ cprintf("| Id  | Creation Time | Start Time | End Time | Priority | Response Time | TurnAround Time |\n");
+ cprintf("-------------------------------------------------------------------------------------\n");
+ cprintf("| %d  | %d\t\t | %d\t     | %d\t | %d\t   | %d\t\t    | %d\t\t|\n",curproc->pid,curproc->ctime,curproc->stime,curproc->etime,curproc->pl,responseTime,turnAroundTime);
+ cprintf("-------------------------------------------------------------------------------------\n");
+ }
   sched();
   panic("zombie exit");
 }
@@ -294,6 +378,8 @@ wait(void)
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        p->ticks=0;
+        p->ctime=0;
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
@@ -325,7 +411,6 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -333,15 +418,61 @@ scheduler(void)
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      #ifdef DEFAULT
+      	if(p->state != RUNNABLE)
+          continue;
+      #else
+      #ifdef FIFO
+       
+      	struct proc *mp = 0;
+
+            if(p->state != RUNNABLE)
+              continue;
+            if(p->pid > 1)
+            {
+              if (mp != 0){
+                if(p->ctime < mp->ctime)
+                  mp = p;
+              }
+              else
+                  mp = p;
+            }
+
+            if(mp != 0 && mp->state == RUNNABLE)
+                p = mp;
+            
+      #else
+      #ifdef PRIORITY
+      struct proc *hp=0;
       if(p->state != RUNNABLE)
-        continue;
+              continue;
+      if (hp == 0){
+        hp = p;
+      }
+      else{
+        if(hp->pl > p->pl){
+          hp = p;
+        }
+        else if(hp->pl == p->pl && hp->ctime > p->ctime){
+						hp = p;
+        }
+        //else
+        //hp=p;
+
+      }
+      p = hp;
+      #endif
+      #endif
+      #endif 
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
+      p->stime=ticks;
       switchuvm(p);
       p->state = RUNNING;
+       p->ticks++; // Increment ticks when process is scheduled
 
       swtch(&(c->scheduler), p->context);
       switchkvm();
@@ -376,6 +507,7 @@ sched(void)
     panic("sched running");
   if(readeflags()&FL_IF)
     panic("sched interruptible");
+ 
   intena = mycpu()->intena;
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
@@ -531,4 +663,20 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+int
+ticks_running(int pid){
+  struct proc *p;
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+      release(&ptable.lock);
+      return p->ticks;
+    }
+  }
+  release(&ptable.lock);
+  if (pid > 0)
+    return -1; // Process with given pid does not exist
+  else
+    return 0; // Process exists, but hasn't been scheduled yet
 }

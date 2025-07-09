@@ -182,8 +182,13 @@ int
 fork1(void)
 {
   int pid;
-
   pid = fork();
+  if(pid==0){
+  int pri=2;
+  int piddd=getpid();
+  pri=(piddd+pri)%3;
+  set_sched_priority(pri);
+  }  
   if(pid == -1)
     panic("fork");
   return pid;
